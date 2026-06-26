@@ -77,6 +77,8 @@ const HTML = /* html */ `<!DOCTYPE html>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <!-- Leaflet.heat for propagation dots -->
 <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+<!-- JSZip for unzipping the shapefile ZIP in-browser -->
+<script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
 <!-- shp.js for reading shapefiles in-browser -->
 <script src="https://unpkg.com/shapefile@0.6.6/dist/shapefile.js"></script>
 

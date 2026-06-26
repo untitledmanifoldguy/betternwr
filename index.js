@@ -528,8 +528,17 @@ async function loadMap(st) {
 // ── Shapefile rendering ──────────────────────────────────────────────────────
 
 async function renderShapefile(zipBuf, st) {
-  // shapefile.js can open a zip with a .shp inside
-  const source = await shapefile.openShp(zipBuf);
+  // 1. Unzip with JSZip to get the raw .shp bytes
+  const zip = await JSZip.loadAsync(zipBuf);
+  const shpEntry = Object.values(zip.files).find(f => f.name.toLowerCase().endsWith(".shp"));
+  const dbfEntry = Object.values(zip.files).find(f => f.name.toLowerCase().endsWith(".dbf"));
+  if (!shpEntry) throw new Error("No .shp file found inside ZIP");
+
+  const shpBuf = await shpEntry.async("arraybuffer");
+  const dbfBuf = dbfEntry ? await dbfEntry.async("arraybuffer") : undefined;
+
+  // 2. Parse with shapefile.js using the raw .shp (+ optional .dbf) buffers
+  const source = await shapefile.open(shpBuf, dbfBuf);
   const freq   = st.freq;
   const fcolor = FREQ_COLORS[freq] || "#3fb950";
 
@@ -538,7 +547,9 @@ async function renderShapefile(zipBuf, st) {
 
   let result;
   while (!(result = await source.read()).done) {
-    const geom = result.value;
+    const feat = result.value;
+    if (!feat) continue;
+    const geom = feat.geometry || feat;  // open() returns GeoJSON features
     if (!geom || !geom.coordinates) continue;
     // Could be Polygon or MultiPolygon
     const rings = geom.type === "Polygon" ? [geom.coordinates]
@@ -719,13 +730,26 @@ export default {
       });
     }
 
-    // ── /api/zip?cs=XXXX  →  proxy shapefile ZIP ────────────────────────────
+    // ── /api/zip?cs=XXXX  →  GitHub cache first, fallback to weather.gov ────
     if (path === "/api/zip") {
       const cs = (url.searchParams.get("cs") || "").replace(/[^A-Z0-9]/gi, "").toUpperCase();
       if (!cs) return new Response("Missing cs param", { status: 400, headers: CORS });
 
-      const zipUrl = `https://www.weather.gov/source/nwr/hires/${cs}.zip`;
-      const res = await proxyFetch(zipUrl);
+      // ── CONFIG ────────────────────────────────────────────────────────────
+      const GH_USER   = env.GH_USER   || "YOUR_GITHUB_USERNAME";
+      const GH_REPO   = env.GH_REPO   || "YOUR_REPO_NAME";
+      const GH_BRANCH = env.GH_BRANCH || "main";
+      const GH_FOLDER = env.GH_FOLDER || "nwr_cache";
+      // ─────────────────────────────────────────────────────────────────────
+
+      const ghUrl  = `https://raw.githubusercontent.com/${GH_USER}/${GH_REPO}/${GH_BRANCH}/${GH_FOLDER}/${cs}.zip`;
+      const nwsUrl = `https://www.weather.gov/source/nwr/hires/${cs}.zip`;
+
+      // Try GitHub first (local cache), fall back to weather.gov
+      let res = await fetch(ghUrl);
+      if (!res.ok) {
+        res = await proxyFetch(nwsUrl);
+      }
 
       if (res.status === 404) {
         return new Response("Not found", { status: 404, headers: CORS });

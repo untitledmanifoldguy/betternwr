@@ -55,7 +55,17 @@ html,body{height:100%;font-family:system-ui,sans-serif;background:#0d1117;color:
 .ri-body{flex:1;min-width:0}
 .ri-cs{font-family:monospace;font-size:13px;font-weight:700;color:#e6edf3}
 .ri-sub{font-size:11px;color:#8b949e;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ri-tx{font-size:10px;color:#58a6ff;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ri-dist{font-size:11px;font-family:monospace;color:#58a6ff;white-space:nowrap}
+
+/* ── No-results toast ── */
+#no-results-toast{position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:99999;background:#1c2128;border:1px solid #f85149;border-radius:10px;padding:16px 24px;display:none;flex-direction:column;align-items:center;gap:8px;box-shadow:0 8px 32px #000c;min-width:320px;max-width:480px;text-align:center;animation:toastIn .2s ease}
+@keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(-12px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+#no-results-toast .nt-icon{font-size:28px;line-height:1}
+#no-results-toast .nt-title{font-size:14px;font-weight:700;color:#f85149}
+#no-results-toast .nt-body{font-size:12px;color:#8b949e;line-height:1.5}
+#no-results-toast .nt-close{margin-top:4px;padding:5px 18px;border-radius:6px;border:1px solid #30363d;background:#21262d;color:#e6edf3;font-size:12px;font-weight:600;cursor:pointer;font-family:monospace}
+#no-results-toast .nt-close:hover{background:#30363d}
 #results-empty{padding:24px 16px;font-size:12px;color:#484f58;text-align:center;line-height:1.6}
 
 /* ── Detail / map area ── */
@@ -198,6 +208,14 @@ table.same-tbl tr.highlighted td{background:#58a6ff18}
     </div>
 
   </div>
+</div>
+
+<!-- No-results toast -->
+<div id="no-results-toast">
+  <div class="nt-icon">📡</div>
+  <div class="nt-title" id="nt-title">No stations found</div>
+  <div class="nt-body" id="nt-body"></div>
+  <button class="nt-close" id="nt-close">DISMISS</button>
 </div>
 
 <!-- Floating tooltip -->
@@ -365,7 +383,7 @@ function setupObservers() {
 // ── CCL.js parsing ────────────────────────────────────────────────────────────
 function parseCCL(js) {
   const fields = ['CALLSIGN','FREQ','LAT','LON','SITESTATE','STATUS',
-                  'SITENAME','PWR','WFO','COUNTY','SAME','ST','STATE'];
+                  'SITENAME','SITELOC','PWR','WFO','COUNTY','SAME','ST','STATE'];
   const pat = new RegExp(
     '(' + fields.join('|') + ')\\[(\\d+)\\]\\s*=\\s*"([^"]*)"', 'g'
   );
@@ -405,6 +423,7 @@ function parseCCL(js) {
       state:    (r0.SITESTATE||r0.ST||'').trim(),
       status:   (r0.STATUS||'').trim(),
       name:     (r0.SITENAME||'').trim(),
+      txLoc:    (r0.SITELOC||'').trim(),
       pwr:      (r0.PWR||'').trim(),
       wfo:      (r0.WFO||'').trim(),
       sameCodes, counties,
@@ -439,6 +458,34 @@ fetch(CCL_URL_DIRECT)
 function setStatus(msg, cls='') {
   statusBar.textContent = msg;
   statusBar.className = cls;
+}
+
+// ── No-results notification ───────────────────────────────────────────────────
+const noResultsToast = $('no-results-toast');
+$('nt-close').addEventListener('click', () => { noResultsToast.style.display = 'none'; });
+
+function showNoResults(radius, label) {
+  const msg = `No NWR stations found within ${radius} miles of ${label}. Try increasing the radius.`;
+
+  // In-app toast
+  $('nt-title').textContent = `No stations within ${radius} mi`;
+  $('nt-body').textContent = `Nothing found near "${label}". Try increasing the radius slider.`;
+  noResultsToast.style.display = 'flex';
+  // Auto-dismiss after 8s
+  setTimeout(() => { noResultsToast.style.display = 'none'; }, 8000);
+
+  // Browser notification (request permission if needed)
+  if ('Notification' in window) {
+    if (Notification.permission === 'granted') {
+      new Notification('NWR Station Finder', { body: msg, icon: '' });
+    } else if (Notification.permission !== 'denied') {
+      Notification.requestPermission().then(perm => {
+        if (perm === 'granted') new Notification('NWR Station Finder', { body: msg });
+      });
+    }
+  }
+
+  setStatus(`⚠ No stations within ${radius} mi of ${label}`, 'err');
 }
 
 // ── Haversine distance ────────────────────────────────────────────────────────
@@ -575,6 +622,7 @@ function showResults(items, header) {
       <div class="ri-body">
         <div class="ri-cs">${st.callsign}</div>
         <div class="ri-sub">${st.freq} MHz — ${st.name}, ${st.state} [${st.countyCount} co.]</div>
+        ${st.txLoc ? `<div class="ri-tx">📡 ${st.txLoc}</div>` : ''}
       </div>
     `;
     el.addEventListener('click', () => selectStation(item, el));
@@ -594,7 +642,7 @@ function selectStation(item, el) {
   $('det-cs').textContent = selected.callsign;
   $('det-cs').style.color = sc;
   $('det-sub').textContent =
-    `${selected.freq} MHz · ${selected.name}, ${selected.state} · ${selected.pwr ? selected.pwr+' W' : ''} · WFO: ${selected.wfo.replace('|',' — ')}` +
+    `${selected.freq} MHz · ${selected.name}${selected.txLoc ? ' (broadcasts from ' + selected.txLoc + ')' : ''}, ${selected.state} · ${selected.pwr ? selected.pwr+' W' : ''} · WFO: ${selected.wfo.replace('|',' — ')}` +
     (item.dist ? ` · ${item.dist.toFixed(1)} mi away` : '');
 
   $('det-btns').innerHTML = '';

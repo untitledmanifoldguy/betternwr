@@ -1,0 +1,1002 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NWR Station Finder</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
+<script src="https://unpkg.com/shpjs@latest/dist/shp.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;overflow:hidden}
+
+/* ── Layout ── */
+#app{display:flex;flex-direction:column;height:100vh;overflow:hidden}
+#topbar{background:#161b22;border-bottom:1px solid #30363d;padding:0 14px;display:flex;align-items:center;gap:8px;flex-shrink:0;height:52px;overflow:visible;min-width:0}
+#main{display:flex;flex:1;min-height:0;overflow:hidden}
+
+/* ── Top bar ── */
+#topbar .logo{font-family:monospace;font-size:15px;font-weight:700;color:#58a6ff;white-space:nowrap;letter-spacing:.04em}
+#topbar .logo span{color:#3fb950}
+.tb-sep{color:#30363d;font-size:18px;user-select:none;flex-shrink:1}
+.search-wrap{display:flex;align-items:center;background:#0d1117;border:1px solid #30363d;border-radius:6px;overflow:hidden;height:34px;flex-shrink:1;min-width:0}
+.search-wrap label{font-size:10px;font-weight:700;letter-spacing:.06em;color:#484f58;padding:0 8px;white-space:nowrap;flex-shrink:0}
+.search-wrap input{background:transparent;border:none;outline:none;color:#e6edf3;font-family:monospace;font-size:13px;font-weight:600;padding:0 6px;width:120px;min-width:60px;flex-shrink:1}
+.search-wrap input::placeholder{color:#484f58;font-weight:400}
+.tb-btn{height:34px;padding:0 14px;border-radius:6px;border:none;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;font-family:monospace;letter-spacing:.04em;transition:opacity .15s;flex-shrink:0}
+.tb-btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-blue{background:#58a6ff;color:#0d1117}
+.btn-blue:hover:not(:disabled){background:#79b8ff}
+.btn-green{background:#3fb950;color:#0d1117}
+.btn-green:hover:not(:disabled){background:#56d364}
+.btn-ghost{background:#21262d;color:#8b949e;border:1px solid #30363d}
+.btn-ghost:hover:not(:disabled){background:#30363d;color:#e6edf3}
+
+#radius-wrap{display:flex;align-items:center;gap:6px;color:#484f58;font-size:11px;font-weight:700;letter-spacing:.04em;flex-shrink:1;min-width:0}
+#radius-wrap input[type=range]{width:70px;min-width:40px;accent-color:#3fb950;flex-shrink:1}
+#radius-lbl{color:#e6edf3;font-size:12px;font-weight:700;font-family:monospace;min-width:44px}
+#loc-autocomplete{position:absolute;z-index:9999;background:#161b22;border:1px solid #30363d;border-radius:6px;overflow-y:auto;max-height:260px;display:none;scrollbar-width:thin;scrollbar-color:#30363d #161b22;top:calc(100% + 4px);left:0;min-width:300px;box-shadow:0 8px 24px #000a}
+#statusbar{font-size:11px;color:#8b949e;white-space:nowrap;margin-left:auto;flex-shrink:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+#statusbar.ok{color:#3fb950}
+#statusbar.warn{color:#d29922}
+#statusbar.err{color:#f85149}
+
+/* ── Left panel (results list) ── */
+#left{width:300px;flex-shrink:0;background:#161b22;border-right:1px solid #30363d;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+#results-hdr{font-size:10px;font-weight:700;letter-spacing:.06em;color:#484f58;padding:6px 12px;border-bottom:1px solid #21262d;text-transform:uppercase;line-height:1.4;flex-shrink:0}
+#results-list{flex:1;overflow-y:auto;min-height:0;scrollbar-width:thin;scrollbar-color:#30363d #161b22}
+.result-item{padding:8px 12px;border-bottom:1px solid #21262d;cursor:pointer;display:flex;align-items:center;gap:10px;transition:background .1s}
+.result-item:hover{background:#1c2128}
+.result-item.active{background:#1c2128;border-left:3px solid #58a6ff}
+.ri-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.ri-body{flex:1;min-width:0}
+.ri-cs{font-family:monospace;font-size:13px;font-weight:700;color:#e6edf3}
+.ri-sub{font-size:11px;color:#8b949e;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ri-dist{font-size:11px;font-family:monospace;color:#58a6ff;white-space:nowrap}
+#results-empty{padding:24px 16px;font-size:12px;color:#484f58;text-align:center;line-height:1.6}
+
+/* ── Detail / map area ── */
+#right{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}
+#detail-bar{background:#161b22;border-bottom:1px solid #30363d;padding:8px 14px;display:flex;align-items:center;gap:12px;flex-shrink:0;min-height:46px}
+#det-cs{font-family:monospace;font-size:18px;font-weight:700;color:#e6edf3}
+#det-sub{font-size:12px;color:#8b949e;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.det-badge{font-size:11px;padding:2px 10px;border-radius:99px;font-weight:600;white-space:nowrap}
+#det-btns{display:flex;gap:6px;flex-shrink:0}
+
+/* ── Map overlay control box (matches NWS screenshot) ── */
+#map-ctrl{position:absolute;top:10px;right:10px;z-index:1000;background:#161b22ee;border:1px solid #30363d;border-radius:8px;padding:10px 14px;font-size:12px;min-width:152px;box-shadow:0 2px 10px #0009}
+.mc-title{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#484f58;margin:8px 0 5px;font-weight:700}
+.mc-title:first-child{margin-top:0}
+.mc-row{display:flex;align-items:center;gap:7px;padding:2px 0;color:#c9d1d9;cursor:pointer}
+.mc-row:hover{color:#e6edf3}
+.mc-row input{accent-color:#3fb950;cursor:pointer}
+.legend-row{display:flex;align-items:center;gap:7px;padding:2px 0;font-size:11px;color:#8b949e}
+.swatch{width:14px;height:12px;border-radius:3px;flex-shrink:0}
+#map-status{position:absolute;bottom:10px;left:10px;z-index:1000;background:#161b22cc;border:1px solid #30363d;border-radius:6px;padding:5px 10px;font-size:11px;color:#d29922;pointer-events:none;display:none}
+
+/* ── SAME sidebar ── */
+#same-panel{width:320px;flex-shrink:0;background:#161b22;border-left:1px solid #30363d;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+#same-hdr{padding:8px 12px 6px;border-bottom:1px solid #21262d;font-size:10px;font-weight:700;letter-spacing:.06em;color:#484f58;text-transform:uppercase;flex-shrink:0}
+#coverage-note{padding:8px 12px;font-size:11px;color:#8b949e;line-height:1.5;border-bottom:1px solid #21262d;flex-shrink:0}
+#coverage-note strong{color:#c9d1d9}
+
+#same-table-wrap{flex:1;overflow-y:auto;min-height:0;scrollbar-width:thin;scrollbar-color:#30363d #161b22}
+table.same-tbl{width:100%;border-collapse:collapse;font-size:11px}
+table.same-tbl th{background:#21262d;color:#8b949e;font-weight:700;text-align:left;padding:5px 8px;border-bottom:1px solid #30363d;position:sticky;top:0;z-index:1}
+table.same-tbl td{padding:4px 8px;border-bottom:1px solid #1c2128;color:#c9d1d9}
+table.same-tbl tr:hover td{background:#1c2128}
+table.same-tbl td.same-code{font-family:monospace;color:#58a6ff;font-size:12px}
+table.same-tbl tr.highlighted td{background:#58a6ff18}
+#same-empty{padding:24px;font-size:12px;color:#484f58;text-align:center}
+
+/* ── Autocomplete dropdown ── */
+#autocomplete{position:absolute;z-index:9999;background:#161b22;border:1px solid #30363d;border-radius:6px;overflow-y:auto;max-height:240px;display:none;scrollbar-width:thin;scrollbar-color:#30363d #161b22;top:calc(100% + 4px);left:0;min-width:300px;box-shadow:0 8px 24px #000a}
+
+.ac-item{padding:6px 10px;cursor:pointer;font-family:monospace;font-size:12px;color:#c9d1d9;display:flex;gap:10px}
+.ac-item:hover,.ac-item.ac-sel{background:#1c2128;color:#e6edf3}
+.ac-cs{font-weight:700;min-width:60px}
+.ac-sub{color:#8b949e;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ── Tooltip ── */
+#map-tip{position:fixed;display:none;pointer-events:none;z-index:9999;background:#0d1117;border:1px solid #30363d;color:#e6edf3;padding:5px 10px;border-radius:4px;font-size:12px}
+
+/* Leaflet popup dark theme */
+.leaflet-popup-content-wrapper{background:#161b22;color:#e6edf3;border:1px solid #30363d;border-radius:8px;box-shadow:none}
+.leaflet-popup-tip{background:#161b22}
+.lp-same{font-family:monospace;color:#58a6ff;font-size:12px}
+
+/* #map-wrap is the flex:1 container; #map fills it absolutely so Leaflet
+   gets a real pixel size. The ResizeObserver calls invalidateSize on any
+   layout change so tiles always fill the container correctly. */
+#map-wrap{flex:1;position:relative;min-height:0;overflow:hidden}
+#map{position:absolute;top:0;left:0;right:0;bottom:0}
+.leaflet-container{width:100%!important;height:100%!important}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Top bar ── -->
+  <div id="topbar">
+    <div class="logo">◈ NWR<span>FINDER</span></div>
+    <div class="tb-sep">|</div>
+
+    <!-- Callsign search -->
+    <div style="position:relative">
+      <div class="search-wrap" id="cs-wrap">
+        <label>CALLSIGN</label>
+        <input id="cs-input" placeholder="e.g. KIH28" maxlength="7" autocomplete="off" spellcheck="false">
+      </div>
+      <div id="autocomplete"></div>
+    </div>
+    <button class="tb-btn btn-blue" id="cs-btn">LOOK UP →</button>
+
+    <div class="tb-sep">|</div>
+
+    <!-- Location search -->
+    <div style="position:relative">
+      <div class="search-wrap" style="max-width:220px">
+        <label>LOCATION</label>
+        <input id="loc-input" placeholder="city, state or ZIP" style="width:150px;min-width:0;text-overflow:ellipsis" autocomplete="off">
+      </div>
+      <div id="loc-autocomplete"></div>
+    </div>
+    <div id="radius-wrap">
+      RADIUS
+      <input type="range" id="radius-slider" min="10" max="150" value="40" step="5">
+      <span id="radius-lbl">40 mi</span>
+    </div>
+    <button class="tb-btn btn-green" id="loc-btn">FIND NEARBY →</button>
+
+    <button class="tb-btn btn-ghost" id="clear-btn" title="Clear results and reset map">✕ CLEAR</button>
+    <div class="tb-sep">|</div>
+    <button class="tb-btn btn-ghost" id="nws-btn" disabled>NWS PAGE ↗</button>
+
+    <span id="statusbar">Loading stations…</span>
+  </div>
+
+  <!-- ── Main content ── -->
+  <div id="main">
+
+    <!-- Results list -->
+    <div id="left">
+      <div id="results-hdr">NO RESULTS</div>
+      <div id="results-list">
+        <div id="results-empty">Search by callsign or find<br>stations near a location.</div>
+      </div>
+    </div>
+
+    <!-- Map + detail -->
+    <div id="right">
+      <div id="detail-bar">
+        <span id="det-cs" style="color:#484f58">—</span>
+        <span id="det-sub">Select a station to view details</span>
+        <div id="det-btns"></div>
+      </div>
+      <div id="map-wrap">
+        <div id="map"></div>
+        <!-- Layer control (built by JS after map loads) -->
+        <div id="map-ctrl"></div>
+        <div id="map-status"></div>
+      </div>
+    </div>
+
+    <!-- SAME table sidebar -->
+    <div id="same-panel">
+      <div id="same-hdr">Areas Receiving Alert Tones</div>
+      <div id="coverage-note">
+        <strong>Coverage</strong> is calculated assuming ideal conditions.
+        Actual coverage may be 5–10% below predicted.<br>
+        <strong>Signal &gt;18 dBμV</strong> = Reliable coverage.
+      </div>
+      <div id="same-table-wrap">
+        <div id="same-empty">No station selected.</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Floating tooltip -->
+<div id="map-tip"></div>
+
+<script>
+'use strict';
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+// Try direct first; fall back to CORS proxy if blocked
+const CCL_URL_DIRECT = 'https://www.weather.gov/source/nwr/JS/CCL.js';
+const CCL_URL   = 'https://corsproxy.io/?' + encodeURIComponent('https://www.weather.gov/source/nwr/JS/CCL.js');
+const HIRES_URL = 'https://www.weather.gov/source/nwr/hires/{cs}.zip';
+const GEOCODE   = 'https://nominatim.openstreetmap.org/search';
+const TOPO_URL  = 'https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json';
+
+const STATUS_COLOR = s => {
+  const l = (s||'').toLowerCase();
+  if (l.includes('normal'))  return '#3fb950';
+  if (l.includes('out'))     return '#f85149';
+  if (l.trim())              return '#d29922';
+  return '#8b949e';
+};
+
+const STATE_FIPS = {
+  '01':'AL','02':'AK','04':'AZ','05':'AR','06':'CA','08':'CO','09':'CT',
+  '10':'DE','11':'DC','12':'FL','13':'GA','15':'HI','16':'ID','17':'IL',
+  '18':'IN','19':'IA','20':'KS','21':'KY','22':'LA','23':'ME','24':'MD',
+  '25':'MA','26':'MI','27':'MN','28':'MS','29':'MO','30':'MT','31':'NE',
+  '32':'NV','33':'NH','34':'NJ','35':'NM','36':'NY','37':'NC','38':'ND',
+  '39':'OH','40':'OK','41':'OR','42':'PA','44':'RI','45':'SC','46':'SD',
+  '47':'TN','48':'TX','49':'UT','50':'VT','51':'VA','53':'WA','54':'WV',
+  '55':'WI','56':'WY','72':'PR'
+};
+
+const TILE_LAYERS = {
+  TopoMap:   ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+              'Tiles &copy; Esri'],
+  Streets:   ['https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+              '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a>'],
+  Satellite: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+              'Tiles &copy; Esri'],
+  Terrain:   ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Terrain_Base/MapServer/tile/{z}/{y}/{x}',
+              'Tiles &copy; Esri'],
+};
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let stations = {};          // { callsign: stationObj }
+let stationsList = [];      // array of stationObj
+let selected = null;        // currently selected station
+let currentResults = [];    // displayed result list
+let acItems = [];           // autocomplete items
+let acIdx = -1;
+
+// Map layers (togglable)
+let mapLayers = { prop: null, counties: null, alerting: null, sameLabels: null, stationMarker: null };
+let baseLayers = {};
+let activeBase = null;
+let countyGeoJSON = null;   // cached us-atlas data
+
+
+// ── DOM refs ──────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const csInput   = $('cs-input');
+const locInput  = $('loc-input');
+const statusBar = $('statusbar');
+const resultsList = $('results-list');
+const resultsHdr  = $('results-hdr');
+const acDrop    = $('autocomplete');
+const mapTip    = $('map-tip');
+const mapStatus = $('map-status');
+const sameWrap  = $('same-table-wrap');
+
+// ── Leaflet map ───────────────────────────────────────────────────────────────
+// #map is position:absolute inside #map-wrap (flex:1), so it always fills the
+// wrapper. We just need to call invalidateSize whenever the wrapper changes.
+let map;
+const wrapEl = document.getElementById('map-wrap');
+
+function forceMapResize() {
+  if (map) map.invalidateSize({animate: false});
+}
+
+// Re-measure on any container size change (window resize, sidebar changes, etc.)
+new ResizeObserver(forceMapResize).observe(wrapEl);
+
+// Init after two animation frames to guarantee flex layout is resolved
+requestAnimationFrame(() => requestAnimationFrame(() => {
+  map = L.map('map', {center:[39,-96], zoom:4, zoomControl:true, preferCanvas:false});
+
+  Object.entries(TILE_LAYERS).forEach(([name,[url,attr]]) => {
+    baseLayers[name] = L.tileLayer(url, {maxZoom:18, attribution:attr});
+  });
+  baseLayers['TopoMap'].addTo(map);
+  activeBase = baseLayers['TopoMap'];
+
+  map.invalidateSize({animate: false});
+  buildCtrl();
+  setupObservers();
+}));
+
+// Tooltip
+document.addEventListener('mousemove', e => {
+  mapTip.style.left = (e.clientX + 14) + 'px';
+  mapTip.style.top  = (e.clientY - 8)  + 'px';
+});
+function tipShow(html) { mapTip.innerHTML = html; mapTip.style.display = 'block'; }
+function tipHide()     { mapTip.style.display = 'none'; }
+
+function setMapStatus(msg, color='#d29922') {
+  mapStatus.textContent = msg;
+  mapStatus.style.color = color;
+  mapStatus.style.display = msg ? 'block' : 'none';
+}
+
+// ── Build map control overlay ─────────────────────────────────────────────────
+function buildCtrl() {
+  const ctrl = $('map-ctrl');
+  ctrl.innerHTML = `
+    <div class="mc-title">Basemap</div>
+    ${Object.keys(TILE_LAYERS).map(n =>
+      `<label class="mc-row"><input type="radio" name="bm" value="${n}"${n==='TopoMap'?' checked':''}> ${n}</label>`
+    ).join('')}
+    <div class="mc-title">Layers</div>
+    <label class="mc-row"><input type="checkbox" id="ck-prop" checked> Propagation</label>
+    <label class="mc-row"><input type="checkbox" id="ck-counties" checked> Counties</label>
+    <label class="mc-row"><input type="checkbox" id="ck-alert" checked> Alerting area</label>
+    <label class="mc-row"><input type="checkbox" id="ck-same"> SAME labels <span style="color:#484f58;font-size:10px">(zoom in)</span></label>
+    <div class="mc-title">Legend</div>
+    <div class="legend-row"><div class="swatch" style="background:#3fb950"></div> Normal</div>
+    <div class="legend-row"><div class="swatch" style="background:#d29922"></div> Degraded</div>
+    <div class="legend-row"><div class="swatch" style="background:#f85149"></div> Out of service</div>
+  `;
+
+  ctrl.querySelectorAll('input[name=bm]').forEach(r => {
+    r.addEventListener('change', () => {
+      if (activeBase) map.removeLayer(activeBase);
+      activeBase = baseLayers[r.value];
+      activeBase.addTo(map);
+      activeBase.bringToBack();
+    });
+  });
+
+  function toggleLayer(id, key) {
+    const cb = document.getElementById(id);
+    if (!cb) return;
+    cb.addEventListener('change', () => {
+      if (!mapLayers[key]) return;
+      cb.checked ? mapLayers[key].addTo(map) : map.removeLayer(mapLayers[key]);
+    });
+  }
+  toggleLayer('ck-prop',     'prop');
+  toggleLayer('ck-counties', 'counties');
+  toggleLayer('ck-alert',    'alerting');
+  toggleLayer('ck-same',     'sameLabels');
+}
+
+function setupObservers() {
+  new MutationObserver(forceMapResize).observe($('det-sub'), {childList:true, characterData:true, subtree:true});
+  new MutationObserver(forceMapResize).observe($('results-list'), {childList:true});
+}
+
+
+
+// ── CCL.js parsing ────────────────────────────────────────────────────────────
+function parseCCL(js) {
+  const fields = ['CALLSIGN','FREQ','LAT','LON','SITESTATE','STATUS',
+                  'SITENAME','PWR','WFO','COUNTY','SAME','ST','STATE'];
+  const pat = new RegExp(
+    '(' + fields.join('|') + ')\\[(\\d+)\\]\\s*=\\s*"([^"]*)"', 'g'
+  );
+  const raw = {};
+  let m;
+  while ((m = pat.exec(js)) !== null) {
+    const [, field, idx, val] = m;
+    if (!raw[idx]) raw[idx] = {};
+    raw[idx][field] = val;
+  }
+
+  // Group by callsign, merge SAME/COUNTY
+  const byCs = {};
+  for (const idx of Object.keys(raw).map(Number).sort((a,b)=>a-b)) {
+    const rec = raw[idx];
+    const cs = (rec.CALLSIGN||'').trim().toUpperCase();
+    if (!cs) continue;
+    if (!byCs[cs]) byCs[cs] = [];
+    byCs[cs].push(rec);
+  }
+
+  const out = {};
+  for (const [cs, recs] of Object.entries(byCs)) {
+    const r0 = recs[0];
+    const sameCodes = [], counties = [];
+    const seen = new Set();
+    for (const rec of recs) {
+      const s = (rec.SAME||'').trim();
+      const c = (rec.COUNTY||'').trim();
+      if (s && !seen.has(s)) { seen.add(s); sameCodes.push(s); counties.push(c); }
+    }
+    out[cs] = {
+      callsign: cs,
+      freq:     (r0.FREQ||'').trim(),
+      lat:      parseFloat(r0.LAT||0),
+      lon:      parseFloat(r0.LON||0),
+      state:    (r0.SITESTATE||r0.ST||'').trim(),
+      status:   (r0.STATUS||'').trim(),
+      name:     (r0.SITENAME||'').trim(),
+      pwr:      (r0.PWR||'').trim(),
+      wfo:      (r0.WFO||'').trim(),
+      sameCodes, counties,
+      countyCount: sameCodes.length,
+    };
+  }
+  return out;
+}
+
+// ── Load stations ─────────────────────────────────────────────────────────────
+setStatus('Loading stations…', 'warn');
+
+function processStationData(js) {
+  stations = parseCCL(js);
+  stationsList = Object.values(stations);
+  if (!stationsList.length) throw new Error('No stations parsed');
+  setStatus(`✓ ${stationsList.length.toLocaleString()} stations loaded`, 'ok');
+}
+
+// Try direct fetch first, fall back to CORS proxy
+fetch(CCL_URL_DIRECT)
+  .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+  .then(js => processStationData(js))
+  .catch(() => {
+    // Direct blocked by CORS — use proxy
+    return fetch(CCL_URL)
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+      .then(js => processStationData(js))
+      .catch(e => setStatus(`⚠ Failed to load stations: ${e.message}`, 'err'));
+  });
+
+function setStatus(msg, cls='') {
+  statusBar.textContent = msg;
+  statusBar.className = cls;
+}
+
+// ── Haversine distance ────────────────────────────────────────────────────────
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 3958.8, r = Math.PI/180;
+  const dLat = (lat2-lat1)*r, dLon = (lon2-lon1)*r;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*r)*Math.cos(lat2*r)*Math.sin(dLon/2)**2;
+  return R * 2 * Math.asin(Math.sqrt(Math.max(0,a)));
+}
+
+// ── Autocomplete ──────────────────────────────────────────────────────────────
+csInput.addEventListener('input', () => {
+  const q = csInput.value.trim().toUpperCase();
+  if (q.length < 2 || !stationsList.length) { hideAc(); return; }
+
+  // Exact match → auto-select immediately, no dropdown needed
+  if (stations[q]) {
+    hideAc();
+    const item = {st: stations[q], dist: null};
+    showResults([item], '1 station');
+    const el = resultsList.querySelector('.result-item');
+    selectStation(item, el);
+    return;
+  }
+
+  const allKeys = Object.keys(stations).sort();
+  const startsWith = allKeys.filter(cs => cs.startsWith(q));
+  const contains   = allKeys.filter(cs => !cs.startsWith(q) && cs.includes(q));
+  acItems = [...startsWith, ...contains].slice(0, 10);
+  if (!acItems.length) { hideAc(); return; }
+
+  acDrop.innerHTML = acItems.map((cs, i) => {
+    const st = stations[cs];
+    return `<div class="ac-item" data-i="${i}">
+      <span class="ac-cs">${cs}</span>
+      <span class="ac-sub">${st.freq} MHz — ${st.name}, ${st.state} [${st.countyCount} co.]</span>
+    </div>`;
+  }).join('');
+  acDrop.style.display = 'block';
+  acIdx = -1;
+
+  acDrop.querySelectorAll('.ac-item').forEach(el => {
+    el.addEventListener('mousedown', e => {
+      e.preventDefault();
+      const cs = acItems[+el.dataset.i];
+      csInput.value = cs;
+      hideAc();
+      // Directly select this exact station — no re-search
+      const item = {st: stations[cs], dist: null};
+      showResults([item], '1 station');
+      const listEl = resultsList.querySelector('.result-item');
+      selectStation(item, listEl);
+    });
+  });
+});
+
+csInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    if (acDrop.style.display !== 'none' && acIdx >= 0) {
+      const cs = acItems[acIdx];
+      csInput.value = cs;
+      hideAc();
+      const item = {st: stations[cs], dist: null};
+      showResults([item], '1 station');
+      const listEl = resultsList.querySelector('.result-item');
+      selectStation(item, listEl);
+      e.preventDefault();
+    } else {
+      hideAc(); lookupCallsign();
+    }
+    return;
+  }
+  if (acDrop.style.display === 'none') return;
+  const items = acDrop.querySelectorAll('.ac-item');
+  if (e.key === 'ArrowDown') { acIdx = Math.min(acIdx+1, items.length-1); highlightAc(items); e.preventDefault(); }
+  else if (e.key === 'ArrowUp') { acIdx = Math.max(acIdx-1, 0); highlightAc(items); e.preventDefault(); }
+  else if (e.key === 'Escape') hideAc();
+});
+
+function highlightAc(items) {
+  items.forEach((el,i) => el.classList.toggle('ac-sel', i===acIdx));
+  if (items[acIdx]) items[acIdx].scrollIntoView({block:'nearest'});
+}
+function hideAc() { acDrop.style.display = 'none'; acItems = []; acIdx = -1; }
+document.addEventListener('click', e => { if (!e.target.closest('#cs-wrap') && !e.target.closest('#autocomplete')) hideAc(); });
+
+// ── Callsign lookup ───────────────────────────────────────────────────────────
+$('cs-btn').addEventListener('click', lookupCallsign);
+
+function lookupCallsign() {
+  hideAc();
+  const q = csInput.value.trim().toUpperCase();
+  if (!q) return;
+  if (!stationsList.length) { setStatus('⚠ Stations not loaded yet', 'warn'); return; }
+
+  // Exact match → auto-select immediately
+  const st = stations[q];
+  if (st) {
+    const item = {st, dist:null};
+    showResults([item], '1 station');
+    const el = resultsList.querySelector('.result-item');
+    selectStation(item, el);
+    return;
+  }
+
+  const matches = Object.keys(stations).filter(cs => cs.startsWith(q));
+  if (matches.length === 1) {
+    // Single prefix match → auto-select it
+    csInput.value = matches[0];
+    const item = {st: stations[matches[0]], dist:null};
+    showResults([item], '1 station');
+    const el = resultsList.querySelector('.result-item');
+    selectStation(item, el);
+  } else if (matches.length > 1) {
+    showResults(matches.map(cs => ({st:stations[cs], dist:null})), `${matches.length} matches for "${q}"`);
+  } else {
+    setStatus(`⚠ "${q}" not found`, 'err');
+  }
+}
+
+// ── Show results list ─────────────────────────────────────────────────────────
+function showResults(items, header) {
+  currentResults = items;
+  resultsHdr.textContent = header.toUpperCase();
+  resultsList.innerHTML = '';
+  items.forEach((item, i) => {
+    const {st, dist} = item;
+    const sc = STATUS_COLOR(st.status);
+    const el = document.createElement('div');
+    el.className = 'result-item';
+    el.dataset.i = i;
+    el.innerHTML = `
+      <div class="ri-dot" style="background:${sc}"></div>
+      <div class="ri-body">
+        <div class="ri-cs">${st.callsign}</div>
+        <div class="ri-sub">${st.freq} MHz — ${st.name}, ${st.state} [${st.countyCount} co.]</div>
+      </div>
+    `;
+    el.addEventListener('click', () => selectStation(item, el));
+    resultsList.appendChild(el);
+  });
+  forceMapResize();
+}
+
+// ── Select a station ──────────────────────────────────────────────────────────
+function selectStation(item, el) {
+  document.querySelectorAll('.result-item').forEach(e => e.classList.remove('active'));
+  if (el) el.classList.add('active');
+  selected = item.st;
+
+  // Detail bar
+  const sc = STATUS_COLOR(selected.status);
+  $('det-cs').textContent = selected.callsign;
+  $('det-cs').style.color = sc;
+  $('det-sub').textContent =
+    `${selected.freq} MHz · ${selected.name}, ${selected.state} · ${selected.pwr ? selected.pwr+' W' : ''} · WFO: ${selected.wfo.replace('|',' — ')}` +
+    (item.dist ? ` · ${item.dist.toFixed(1)} mi away` : '');
+
+  $('det-btns').innerHTML = '';
+
+  $('nws-btn').disabled = false;
+  $('nws-btn').onclick = () => window.open(`https://www.weather.gov/nwr/sites?site=${selected.callsign}`, '_blank');
+
+  // SAME table
+  buildSameTable(selected);
+
+  // Map
+  clearMapLayers();
+  loadPropagation(selected);
+}
+
+// ── SAME table ────────────────────────────────────────────────────────────────
+function buildSameTable(st) {
+  $('same-hdr').textContent = `${st.callsign} — Areas Receiving Alert Tones (${st.countyCount} counties)`;
+  if (!st.sameCodes.length) {
+    sameWrap.innerHTML = '<div id="same-empty">No alerting areas listed.</div>';
+    return;
+  }
+  let rows = '';
+  st.sameCodes.forEach((code, i) => {
+    const county = st.counties[i] || '—';
+    let stAb = '??';
+    if (code.length === 6) stAb = STATE_FIPS[code.slice(1,3)] || '??';
+    rows += `<tr data-same="${code}"><td>${county}</td><td>${stAb}</td><td class="same-code">${code}</td><td>ALL</td></tr>`;
+  });
+  sameWrap.innerHTML = `
+    <table class="same-tbl">
+      <thead><tr><th>County</th><th>State</th><th>SAME Code</th><th>Partial</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function highlightSameRow(code) {
+  sameWrap.querySelectorAll('tr[data-same]').forEach(tr => {
+    const on = tr.dataset.same === code;
+    tr.classList.toggle('highlighted', on);
+    if (on) tr.scrollIntoView({block:'nearest'});
+  });
+}
+
+// ── Map layer management ──────────────────────────────────────────────────────
+function clearMapLayers() {
+  ['prop','counties','alerting','sameLabels','stationMarker'].forEach(k => {
+    if (mapLayers[k]) { map.removeLayer(mapLayers[k]); mapLayers[k] = null; }
+  });
+}
+
+function getCbChecked(id) {
+  const el = document.getElementById(id);
+  return el ? el.checked : true;
+}
+
+// ── Load propagation shapefile via shpjs ──────────────────────────────────────
+// Cancellation token: incremented each time a new station is selected.
+// Async callbacks (shp fetch, county fetch) bail out if their token is stale.
+let _loadToken = 0;
+
+function loadPropagation(st) {
+  const token = ++_loadToken;
+  setMapStatus('Downloading coverage shapefile…', '#d29922');
+  const url = HIRES_URL.replace('{cs}', st.callsign);
+  const sc = STATUS_COLOR(st.status);
+
+  shp(url)
+    .then(geojson => {
+      if (token !== _loadToken) return; // user switched stations while fetching
+      setMapStatus('');
+      const gj = Array.isArray(geojson) ? geojson[0] : geojson;
+
+      mapLayers.prop = L.geoJSON(gj, {
+        style: {
+          color: sc, weight: 2, opacity: 0.9,
+          fillColor: sc, fillOpacity: 0.18,
+        },
+        onEachFeature: (feature, layer) => {
+          layer.on('mouseover', () => {
+            layer.setStyle({fillOpacity:.38, weight:3});
+            tipShow('📡 ' + (feature.properties ? JSON.stringify(feature.properties).replace(/[{}"]/g,'').slice(0,60) : 'Coverage area'));
+          });
+          layer.on('mouseout', () => {
+            // Only reset style if this prop layer is still the active one
+            if (mapLayers.prop) layer.setStyle({fillOpacity:.18, weight:2});
+            tipHide();
+          });
+          layer.on('click', e => {
+            L.popup().setLatLng(e.latlng)
+              .setContent(`<b>Coverage area</b><br>${st.callsign} · ${st.name}`)
+              .openOn(map);
+          });
+        }
+      });
+
+      if (getCbChecked('ck-prop')) mapLayers.prop.addTo(map);
+
+      placeMarker(st, sc);
+      loadCounties(st, sc, token);
+      forceMapResize();
+    })
+    .catch(err => {
+      if (token !== _loadToken) return;
+      setMapStatus(`No shapefile available: ${err.message}`, '#f85149');
+      if (st.lat && st.lon) map.setView([st.lat, st.lon], 8);
+      placeMarker(st, sc);
+      loadCounties(st, sc, token);
+      forceMapResize();
+    });
+}
+
+function placeMarker(st, sc) {
+  if (!st.lat || !st.lon) return;
+  // Remove any existing station marker before placing a new one
+  if (mapLayers.stationMarker) { map.removeLayer(mapLayers.stationMarker); mapLayers.stationMarker = null; }
+  const icon = L.divIcon({
+    html: `<div style="width:16px;height:16px;border-radius:50%;background:${sc};border:3px solid #fff;box-shadow:0 0 0 2px ${sc}88,0 0 8px ${sc}66"></div>`,
+    iconSize:[16,16], iconAnchor:[8,8], className:''
+  });
+  mapLayers.stationMarker = L.marker([st.lat, st.lon], {icon})
+    .bindPopup(`<b>${st.callsign}</b><br>${st.name}, ${st.state}<br>
+                ${st.freq} MHz · ${st.status}<br>
+                ${st.lat.toFixed(4)}, ${st.lon.toFixed(4)}`)
+    .addTo(map);
+}
+
+// ── County layer ──────────────────────────────────────────────────────────────
+function loadCounties(st, sc, token) {
+  // token: if provided, bail out if user has switched stations since this call
+  if (token !== undefined && token !== _loadToken) return;
+  const sameSet = new Set(st.sameCodes);
+
+  function sameFromFips5(fips5) {
+    for (const s of sameSet) {
+      if (s.length===6 && s.slice(1)===fips5) return s;
+    }
+    return null;
+  }
+
+  function doCounties(us) {
+    const countiesGJ    = topojson.feature(us, us.objects.counties);
+    const stateBordersGJ = topojson.mesh(us, us.objects.states, (a,b) => a!==b);
+
+    // Base county grid
+    mapLayers.counties = L.geoJSON(countiesGJ, {
+      style: () => ({color:'#30363d', weight:.5, opacity:.6, fillOpacity:0, interactive:true}),
+      onEachFeature: (feat, layer) => {
+        const fips5   = feat.id ? String(feat.id).padStart(5,'0') : '';
+        const stAb    = STATE_FIPS[fips5.slice(0,2)] || '??';
+        const name    = (feat.properties && feat.properties.name) || ('FIPS '+fips5);
+        const label   = name + ', ' + stAb;
+        const sameCode = sameFromFips5(fips5);
+        const covered  = !!sameCode;
+
+        layer.on('mouseover', () => {
+          layer.setStyle({fillColor: covered?sc:'#58a6ff', fillOpacity:.22, weight: covered?2:1});
+          tipShow(covered
+            ? `<b>${label}</b><br><span style="font-family:monospace;color:#58a6ff">${sameCode}</span>`
+            : label);
+          layer.bringToFront();
+        });
+        layer.on('mouseout', () => {
+          if (mapLayers.counties) mapLayers.counties.resetStyle(layer);
+          tipHide();
+        });
+        layer.on('click', e => {
+          if (covered) highlightSameRow(sameCode);
+          L.popup().setLatLng(e.latlng)
+            .setContent(covered
+              ? `<b>${label}</b><br>SAME: <span class="lp-same">${sameCode}</span><br>FIPS: ${fips5}`
+              : `<b>${label}</b><br>FIPS: ${fips5}<br><i style="color:#8b949e">Not in alerting area</i>`)
+            .openOn(map);
+        });
+      }
+    });
+    if (getCbChecked('ck-counties')) mapLayers.counties.addTo(map);
+
+    // Alerting area filled overlay
+    const alertFeatures = countiesGJ.features.filter(f => {
+      const fips5 = f.id ? String(f.id).padStart(5,'0') : '';
+      return !!sameFromFips5(fips5);
+    });
+    mapLayers.alerting = L.geoJSON({type:'FeatureCollection',features:alertFeatures}, {
+      style: {color:sc, weight:1.8, opacity:.9, fillColor:sc, fillOpacity:.12, interactive:false}
+    });
+    if (getCbChecked('ck-alert')) mapLayers.alerting.addTo(map);
+
+    // Zoom to alerting area (or county layer if no alerting counties)
+    try {
+      const alertBounds = mapLayers.alerting.getBounds();
+      if (alertBounds.isValid()) {
+        map.fitBounds(alertBounds, {padding:[40,40]});
+      } else {
+        const countyBounds = mapLayers.counties.getBounds();
+        if (countyBounds.isValid()) map.fitBounds(countyBounds, {padding:[60,60]});
+      }
+    } catch(_) {}
+
+    // State borders
+    L.geoJSON(stateBordersGJ, {style:{color:'#58a6ff',weight:1.2,opacity:.3,fill:false}}).addTo(map);
+
+    // SAME labels
+    const labelMarkers = [];
+    alertFeatures.forEach(f => {
+      const fips5 = String(f.id).padStart(5,'0');
+      const code  = sameFromFips5(fips5);
+      if (!code) return;
+      const coords = f.geometry.type==='Polygon'
+        ? f.geometry.coordinates[0]
+        : f.geometry.coordinates[0][0];
+      if (!coords||!coords.length) return;
+      const lons = coords.map(c=>c[0]), lats = coords.map(c=>c[1]);
+      const cLon = (Math.min(...lons)+Math.max(...lons))/2;
+      const cLat = (Math.min(...lats)+Math.max(...lats))/2;
+      labelMarkers.push(L.marker([cLat,cLon], {
+        interactive:false,
+        icon: L.divIcon({
+          html:`<div style="font-family:monospace;font-size:10px;color:#e6edf3;background:#0d1117cc;padding:2px 5px;border-radius:3px;white-space:nowrap;display:inline-block;border:1px solid #30363d44">${code}</div>`,
+          className:'', iconAnchor:[0,8]
+        })
+      }));
+    });
+    mapLayers.sameLabels = L.layerGroup(labelMarkers);
+    // Off by default — checkbox starts unchecked
+
+    map.on('popupclose', () => {
+      sameWrap.querySelectorAll('tr.highlighted').forEach(tr => tr.classList.remove('highlighted'));
+    });
+  }
+
+  if (countyGeoJSON) {
+    doCounties(countyGeoJSON);
+  } else {
+    fetch(TOPO_URL).then(r=>r.json()).then(us => {
+      if (token !== undefined && token !== _loadToken) return;
+      countyGeoJSON = us;
+      doCounties(us);
+    }).catch(err => console.warn('County layer failed:', err));
+  }
+}
+
+// ── Radius slider ─────────────────────────────────────────────────────────────
+$('radius-slider').addEventListener('input', function() {
+  $('radius-lbl').textContent = this.value + ' mi';
+});
+
+// ── Location autocomplete ─────────────────────────────────────────────────────
+const locAcDrop = $('loc-autocomplete');
+let locAcItems = [];
+let locAcIdx   = -1;
+let locAcTimer = null;
+
+function hideLacDrop() {
+  locAcDrop.style.display = 'none';
+  locAcItems = [];
+  locAcIdx   = -1;
+}
+
+function highlightLac(items) {
+  items.forEach((el, i) => el.classList.toggle('ac-sel', i === locAcIdx));
+  if (items[locAcIdx]) items[locAcIdx].scrollIntoView({block:'nearest'});
+}
+
+function shortLabel(r) {
+  const a = r.address || {};
+  const city  = a.city || a.town || a.village || a.county || '';
+  const state = a.state || '';
+  if (city && state) return `${city}, ${state}`;
+  return r.display_name.split(',').slice(0,2).join(',').trim();
+}
+
+locInput.addEventListener('input', () => {
+  clearTimeout(locAcTimer);
+  const q = locInput.value.trim();
+  if (q.length < 2) { hideLacDrop(); return; }
+  locAcTimer = setTimeout(() => {
+    const url = `${GEOCODE}?q=${encodeURIComponent(q)}&format=json&limit=6&countrycodes=us&addressdetails=1`;
+    fetch(url, {headers:{'Accept-Language':'en'}})
+      .then(r => r.json())
+      .then(results => {
+        if (!results.length) { hideLacDrop(); return; }
+        locAcItems = results.map(r => ({
+          label: shortLabel(r),
+          full:  r.display_name.split(',').slice(0,4).join(',').trim(),
+          lat:   parseFloat(r.lat),
+          lon:   parseFloat(r.lon),
+        }));
+        locAcDrop.innerHTML = locAcItems.map((item, i) =>
+          `<div class="ac-item" data-i="${i}">
+            <div style="line-height:1.3">
+              <div style="font-weight:700;color:#e6edf3;font-size:12px">${item.label}</div>
+              <div style="color:#8b949e;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item.full}</div>
+            </div>
+          </div>`
+        ).join('');
+        locAcDrop.style.display = 'block';
+        locAcIdx = -1;
+        locAcDrop.querySelectorAll('.ac-item').forEach(el => {
+          el.addEventListener('mousedown', e => {
+            e.preventDefault();
+            const item = locAcItems[+el.dataset.i];
+            locInput.value = item.label;
+            hideLacDrop();
+            findNearbyCoords(item.lat, item.lon, item.label);
+          });
+        });
+      })
+      .catch(() => hideLacDrop());
+  }, 200);
+});
+
+locInput.addEventListener('keydown', e => {
+  if (locAcDrop.style.display === 'none') {
+    if (e.key === 'Enter') findNearby();
+    return;
+  }
+  const items = locAcDrop.querySelectorAll('.ac-item');
+  if (e.key === 'ArrowDown') { locAcIdx = Math.min(locAcIdx+1, items.length-1); highlightLac(items); e.preventDefault(); }
+  else if (e.key === 'ArrowUp') { locAcIdx = Math.max(locAcIdx-1, 0); highlightLac(items); e.preventDefault(); }
+  else if (e.key === 'Enter') {
+    if (locAcIdx >= 0) {
+      const item = locAcItems[locAcIdx];
+      locInput.value = item.label;
+      hideLacDrop();
+      findNearbyCoords(item.lat, item.lon, item.label);
+    } else {
+      hideLacDrop();
+      findNearby();
+    }
+    e.preventDefault();
+  } else if (e.key === 'Escape') hideLacDrop();
+});
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('#loc-input') && !e.target.closest('#loc-autocomplete')) hideLacDrop();
+});
+
+// ── Location search ───────────────────────────────────────────────────────────
+$('loc-btn').addEventListener('click', findNearby);
+
+function findNearby() {
+  const loc = locInput.value.trim();
+  if (!loc) return;
+  if (!stationsList.length) { setStatus('⚠ Stations not loaded yet', 'warn'); return; }
+  setStatus('Geocoding…', 'warn');
+  const url = `${GEOCODE}?q=${encodeURIComponent(loc)}&format=json&limit=1&countrycodes=us`;
+  fetch(url, {headers:{'Accept-Language':'en'}})
+    .then(r => r.json())
+    .then(data => {
+      if (!data.length) { setStatus('⚠ Location not found', 'err'); return; }
+      const lat = parseFloat(data[0].lat);
+      const lon = parseFloat(data[0].lon);
+      const label = data[0].display_name.split(',').slice(0,2).join(',');
+      findNearbyCoords(lat, lon, label);
+    })
+    .catch(e => setStatus(`⚠ Geocoding error: ${e.message}`, 'err'));
+}
+
+function findNearbyCoords(lat, lon, label) {
+  if (!stationsList.length) { setStatus('⚠ Stations not loaded yet', 'warn'); return; }
+  const radius = +$('radius-slider').value;
+  const nearby = stationsList
+    .map(st => ({st, dist: haversine(lat, lon, st.lat, st.lon)}))
+    .filter(x => x.dist <= radius)
+    .sort((a,b) => a.dist - b.dist);
+  if (!nearby.length) {
+    setStatus(`No stations within ${radius} mi of ${label}`, 'err');
+    return;
+  }
+  map.setView([lat, lon], 8);
+  showResults(nearby, `${nearby.length} stations within ${radius} mi of ${label}`);
+  // Auto-select the nearest station
+  const firstEl = resultsList.querySelector('.result-item');
+  if (firstEl) selectStation(nearby[0], firstEl);
+  setStatus(`✓ ${stationsList.length.toLocaleString()} stations · weather.gov`, 'ok');
+}
+
+// ── Clear / reset ─────────────────────────────────────────────────────────────
+$('clear-btn').addEventListener('click', () => {
+  csInput.value = '';
+  locInput.value = '';
+  hideAc();
+  hideLacDrop();
+  clearMapLayers();
+  resultsList.innerHTML = '<div id="results-empty">Search by callsign or find<br>stations near a location.</div>';
+  resultsHdr.textContent = 'NO RESULTS';
+  selected = null;
+  currentResults = [];
+  $('det-cs').textContent = '—';
+  $('det-cs').style.color = '#484f58';
+  $('det-sub').textContent = 'Select a station to view details';
+  $('det-btns').innerHTML = '';
+  $('nws-btn').disabled = true;
+  sameWrap.innerHTML = '<div id="same-empty">No station selected.</div>';
+  $('same-hdr').textContent = 'Areas Receiving Alert Tones';
+  setMapStatus('');
+  map.setView([39,-96], 4);
+  const statusOk = stationsList.length
+    ? `✓ ${stationsList.length.toLocaleString()} stations · weather.gov`
+    : 'Loading stations…';
+  setStatus(statusOk, stationsList.length ? 'ok' : 'warn');
+});
+</script>
+</body>
+</html>

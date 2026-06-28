@@ -130,9 +130,19 @@ table.same-tbl tr.highlighted td{background:#58a6ff18}
 }
 
 /* Leaflet popup dark theme */
-.leaflet-popup-content-wrapper{background:#161b22;color:#e6edf3;border:1px solid #30363d;border-radius:8px;box-shadow:none}
+.leaflet-popup-content-wrapper{background:#161b22;color:#e6edf3;border:1px solid #30363d;border-radius:8px;box-shadow:0 4px 20px #000c}
 .leaflet-popup-tip{background:#161b22}
 .lp-same{font-family:monospace;color:#58a6ff;font-size:12px}
+.lp-wrap{min-width:200px;font-family:system-ui,sans-serif}
+.lp-callsign{font-family:monospace;font-size:16px;font-weight:700;margin-bottom:8px;padding-bottom:7px;border-bottom:1px solid #30363d}
+.lp-table{width:100%;border-collapse:collapse;font-size:12px}
+.lp-table tr td:first-child{color:#484f58;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:3px 10px 3px 0;white-space:nowrap;vertical-align:top}
+.lp-table tr td:last-child{color:#e6edf3;padding:3px 0;font-weight:500}
+.lp-freq{color:#3fb950!important;font-family:monospace;font-weight:700!important}
+.lp-status-normal{color:#3fb950!important}
+.lp-status-out{color:#f85149!important}
+.lp-status-other{color:#d29922!important}
+.lp-coords{color:#a371f7!important;font-family:monospace;font-size:11px}
 
 /* #map-wrap is the flex:1 container; #map fills it absolutely so Leaflet
    gets a real pixel size. The ResizeObserver calls invalidateSize on any
@@ -815,16 +825,36 @@ function loadPropagation(st) {
 
 function placeMarker(st, sc) {
   if (!st.lat || !st.lon) return;
-  // Remove any existing station marker before placing a new one
   if (mapLayers.stationMarker) { map.removeLayer(mapLayers.stationMarker); mapLayers.stationMarker = null; }
   const icon = L.divIcon({
     html: `<div style="width:16px;height:16px;border-radius:50%;background:${sc};border:3px solid #fff;box-shadow:0 0 0 2px ${sc}88,0 0 8px ${sc}66"></div>`,
     iconSize:[16,16], iconAnchor:[8,8], className:''
   });
+
+  const statusLower = (st.status || '').toLowerCase();
+  const statusClass = statusLower.includes('normal') ? 'lp-status-normal'
+                    : statusLower.includes('out')    ? 'lp-status-out'
+                    : 'lp-status-other';
+
+  const rows = [
+    ['Station ID',      `<span style="font-family:monospace;font-weight:700">${st.callsign}</span>`],
+    ['Station Name',    st.name || '—'],
+    ['Frequency',       st.freq ? `<span class="lp-freq">${st.freq} MHz</span>` : '—'],
+    ['State',           st.state || '—'],
+    ['Station Location',st.txLoc || '—'],
+    ['Power Output',    st.pwr  ? `${st.pwr} W` : '—'],
+    ['Operating Status',`<span class="${statusClass}">${st.status || 'Unknown'}</span>`],
+    ['GPS',             `<span class="lp-coords">${st.lat.toFixed(4)}, ${st.lon.toFixed(4)}</span>`],
+  ].map(([label, val]) => `<tr><td>${label}</td><td>${val}</td></tr>`).join('');
+
+  const popup = `
+    <div class="lp-wrap">
+      <div class="lp-callsign" style="color:${sc}">${st.callsign}</div>
+      <table class="lp-table">${rows}</table>
+    </div>`;
+
   mapLayers.stationMarker = L.marker([st.lat, st.lon], {icon})
-    .bindPopup(`<b>${st.callsign}</b><br>${st.name}, ${st.state}<br>
-                ${st.freq} MHz · ${st.status}<br>
-                ${st.lat.toFixed(4)}, ${st.lon.toFixed(4)}`)
+    .bindPopup(popup, {maxWidth: 280})
     .addTo(map);
 }
 

@@ -736,8 +736,10 @@ function highlightSameRow(code) {
 }
 
 // ── Map layer management ──────────────────────────────────────────────────────
-function clearMapLayers() {
-  ['prop','counties','alerting','sameLabels','stationMarker','locationDot'].forEach(k => {
+function clearMapLayers({ clearLocation = false } = {}) {
+  const keys = ['prop','counties','alerting','sameLabels','stationMarker'];
+  if (clearLocation) keys.push('locationDot');
+  keys.forEach(k => {
     if (mapLayers[k]) { map.removeLayer(mapLayers[k]); mapLayers[k] = null; }
   });
 }
@@ -1117,6 +1119,8 @@ function findNearbyCoords(lat, lon, label) {
     showNoResults(radius, label, lat, lon);
     return;
   }
+  // Clear old location dot before placing a new one
+  if (mapLayers.locationDot) { map.removeLayer(mapLayers.locationDot); mapLayers.locationDot = null; }
   map.setView([lat, lon], 8);
   showResults(nearby, `${nearby.length} stations within ${radius} mi of ${label}`);
   // Auto-select the nearest station
@@ -1135,7 +1139,7 @@ $('clear-btn').addEventListener('click', () => {
   locInput.value = '';
   hideAc();
   hideLacDrop();
-  clearMapLayers();
+  clearMapLayers({ clearLocation: true });
   resultsList.innerHTML = '<div id="results-empty">Search by callsign or find<br>stations near a location.</div>';
   resultsHdr.textContent = 'NO RESULTS';
   selected = null;

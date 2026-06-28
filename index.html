@@ -673,10 +673,11 @@ function selectStation(item, el) {
   const wfoStr  = selected.wfo ? selected.wfo.split('|').join(', ') : '';
 
   $('det-sub').innerHTML = [
-    selected.freq   ? `<span class="det-chip det-chip-freq">${selected.freq} MHz</span>` : '',
+    selected.txLoc  ? `<span class="det-chip det-chip-loc" title="Broadcast location"><span style="color:#484f58;font-size:10px;font-family:system-ui,sans-serif;margin-right:3px">LOCATION</span>${selected.txLoc}</span>` : '',
     selected.name   ? `<span class="det-chip det-chip-name" title="Site name">${selected.name}</span>` : '',
-    selected.txLoc  ? `<span class="det-chip det-chip-loc" title="Transmitter location: ${selected.txLoc}"><span style="color:#484f58;font-size:10px;font-family:system-ui,sans-serif;margin-right:3px">LOCATION</span>${selected.txLoc}</span>` : '',
+    selected.freq   ? `<span class="det-chip det-chip-freq">${selected.freq} MHz</span>` : '',
     selected.pwr    ? `<span class="det-chip">${selected.pwr} W</span>` : '',
+    (selected.lat && selected.lon) ? `<span class="det-chip" title="GPS coordinates" style="color:#a371f7;border-color:#a371f744;background:#a371f711;font-family:monospace">📍 ${selected.lat.toFixed(4)}, ${selected.lon.toFixed(4)}</span>` : '',
     wfoStr          ? `<span class="det-chip det-chip-wfo">WFO: ${wfoStr}</span>` : '',
     distStr         ? `<span class="det-chip det-chip-dist">${distStr}</span>` : '',
     `<span class="det-badge" style="background:${sc}22;color:${sc};border:1px solid ${sc}55">${statusLabel}</span>`,
@@ -761,7 +762,7 @@ function loadPropagation(st) {
         onEachFeature: (feature, layer) => {
           layer.on('mouseover', () => {
             layer.setStyle({fillOpacity:.38, weight:3});
-            tipShow('📡 ' + (feature.properties ? JSON.stringify(feature.properties).replace(/[{}"]/g,'').slice(0,60) : 'Coverage area'));
+            tipShow('📡 ' + (st.name ? `${st.name}, ${st.state}` : st.callsign) + ' — Coverage area');
           });
           layer.on('mouseout', () => {
             // Only reset style if this prop layer is still the active one

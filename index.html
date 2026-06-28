@@ -742,15 +742,41 @@ function getCbChecked(id) {
 // Async callbacks (shp fetch, county fetch) bail out if their token is stale.
 let _loadToken = 0;
 
+// In-memory shapefile cache — avoids re-downloading when revisiting stations
+const _shpCache = {};
+
+function fetchShapefile(callsign) {
+  if (_shpCache[callsign]) return _shpCache[callsign];
+  const url = HIRES_URL.replace('{cs}', callsign);
+  _shpCache[callsign] = shp(url).catch(err => {
+    delete _shpCache[callsign]; // don't cache failures
+    throw err;
+  });
+  return _shpCache[callsign];
+}
+
+// Prefetch shapefiles for nearby stations in the background (non-blocking)
+function prefetchShapefiles(sts, limit = 6) {
+  sts.slice(0, limit).forEach((st, i) => {
+    if (!_shpCache[st.callsign]) {
+      setTimeout(() => fetchShapefile(st.callsign), 300 + i * 150);
+    }
+  });
+}
+
 function loadPropagation(st) {
   const token = ++_loadToken;
-  setMapStatus('Downloading coverage shapefile…', '#d29922');
-  const url = HIRES_URL.replace('{cs}', st.callsign);
   const sc = STATUS_COLOR(st.status);
 
-  shp(url)
+  // Place marker and start county fetch immediately — don't wait for shapefile
+  placeMarker(st, sc);
+  loadCounties(st, sc, token);
+
+  setMapStatus('Loading coverage…', '#d29922');
+
+  fetchShapefile(st.callsign)
     .then(geojson => {
-      if (token !== _loadToken) return; // user switched stations while fetching
+      if (token !== _loadToken) return;
       setMapStatus('');
       const gj = Array.isArray(geojson) ? geojson[0] : geojson;
 
@@ -765,7 +791,6 @@ function loadPropagation(st) {
             tipShow('📡 ' + (st.name ? `${st.name}, ${st.state}` : st.callsign) + ' — Coverage area');
           });
           layer.on('mouseout', () => {
-            // Only reset style if this prop layer is still the active one
             if (mapLayers.prop) layer.setStyle({fillOpacity:.18, weight:2});
             tipHide();
           });
@@ -778,17 +803,12 @@ function loadPropagation(st) {
       });
 
       if (getCbChecked('ck-prop')) mapLayers.prop.addTo(map);
-
-      placeMarker(st, sc);
-      loadCounties(st, sc, token);
       forceMapResize();
     })
     .catch(err => {
       if (token !== _loadToken) return;
-      setMapStatus(`No shapefile available: ${err.message}`, '#f85149');
+      setMapStatus('No shapefile available', '#f85149');
       if (st.lat && st.lon) map.setView([st.lat, st.lon], 8);
-      placeMarker(st, sc);
-      loadCounties(st, sc, token);
       forceMapResize();
     });
 }
@@ -1072,6 +1092,8 @@ function findNearbyCoords(lat, lon, label) {
   // Auto-select the nearest station
   const firstEl = resultsList.querySelector('.result-item');
   if (firstEl) selectStation(nearby[0], firstEl);
+  // Prefetch shapefiles for next few stations in the background
+  prefetchShapefiles(nearby.slice(1).map(x => x.st));
   // Place blue location dot after station layers load (slight defer so station layers go first)
   setTimeout(() => placeLocationDot(lat, lon, label), 600);
   setStatus(`✓ ${stationsList.length.toLocaleString()} stations · weather.gov`, 'ok');

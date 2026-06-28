@@ -68,11 +68,20 @@ html,body{height:100%;font-family:system-ui,sans-serif;background:#0d1117;color:
 #no-results-toast .nt-close:hover{background:#30363d}
 #results-empty{padding:24px 16px;font-size:12px;color:#484f58;text-align:center;line-height:1.6}
 
+/* ── Detail bar chips ── */
+.det-chip{display:inline-flex;align-items:center;font-size:11px;padding:2px 8px;border-radius:4px;background:#21262d;color:#c9d1d9;border:1px solid #30363d;white-space:nowrap;font-family:monospace;margin-right:4px}
+.det-chip-loc{white-space:normal;word-break:break-word}
+.det-chip-freq{color:#3fb950;border-color:#3fb95044;background:#3fb95011}
+.det-chip-name{color:#e6edf3;font-weight:600}
+.det-chip-loc{color:#8b949e;font-family:system-ui,sans-serif}
+.det-chip-wfo{color:#58a6ff;border-color:#58a6ff44;background:#58a6ff11}
+.det-chip-dist{color:#d29922;border-color:#d2992244;background:#d2992211}
+#det-sub{font-size:12px;color:#8b949e;flex:1;display:flex;align-items:center;flex-wrap:wrap;gap:2px;overflow:hidden}
+
 /* ── Detail / map area ── */
 #right{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}
 #detail-bar{background:#161b22;border-bottom:1px solid #30363d;padding:8px 14px;display:flex;align-items:center;gap:12px;flex-shrink:0;min-height:46px}
 #det-cs{font-family:monospace;font-size:18px;font-weight:700;color:#e6edf3}
-#det-sub{font-size:12px;color:#8b949e;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .det-badge{font-size:11px;padding:2px 10px;border-radius:99px;font-weight:600;white-space:nowrap}
 #det-btns{display:flex;gap:6px;flex-shrink:0}
 
@@ -112,6 +121,13 @@ table.same-tbl tr.highlighted td{background:#58a6ff18}
 
 /* ── Tooltip ── */
 #map-tip{position:fixed;display:none;pointer-events:none;z-index:9999;background:#0d1117;border:1px solid #30363d;color:#e6edf3;padding:5px 10px;border-radius:4px;font-size:12px}
+
+/* Location dot pulse animation */
+@keyframes locPulse {
+  0%   { transform: scale(1);   opacity: .35; }
+  70%  { transform: scale(2.6); opacity: 0; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
 
 /* Leaflet popup dark theme */
 .leaflet-popup-content-wrapper{background:#161b22;color:#e6edf3;border:1px solid #30363d;border-radius:8px;box-shadow:none}
@@ -183,7 +199,7 @@ table.same-tbl tr.highlighted td{background:#58a6ff18}
     <div id="right">
       <div id="detail-bar">
         <span id="det-cs" style="color:#484f58">—</span>
-        <span id="det-sub">Select a station to view details</span>
+        <span id="det-sub" style="color:#484f58;font-family:system-ui,sans-serif;font-size:12px">Select a station to view details</span>
         <div id="det-btns"></div>
       </div>
       <div id="map-wrap">
@@ -271,7 +287,7 @@ let acItems = [];           // autocomplete items
 let acIdx = -1;
 
 // Map layers (togglable)
-let mapLayers = { prop: null, counties: null, alerting: null, sameLabels: null, stationMarker: null };
+let mapLayers = { prop: null, counties: null, alerting: null, sameLabels: null, stationMarker: null, locationDot: null };
 let baseLayers = {};
 let activeBase = null;
 let countyGeoJSON = null;   // cached us-atlas data
@@ -344,6 +360,7 @@ function buildCtrl() {
     <label class="mc-row"><input type="checkbox" id="ck-counties" checked> Counties</label>
     <label class="mc-row"><input type="checkbox" id="ck-alert" checked> Alerting area</label>
     <label class="mc-row"><input type="checkbox" id="ck-same"> SAME labels <span style="color:#484f58;font-size:10px">(zoom in)</span></label>
+    <label class="mc-row"><input type="checkbox" id="ck-locdot" checked> Location</label>
     <div class="mc-title">Legend</div>
     <div class="legend-row"><div class="swatch" style="background:#3fb950"></div> Normal</div>
     <div class="legend-row"><div class="swatch" style="background:#d29922"></div> Degraded</div>
@@ -371,6 +388,7 @@ function buildCtrl() {
   toggleLayer('ck-counties', 'counties');
   toggleLayer('ck-alert',    'alerting');
   toggleLayer('ck-same',     'sameLabels');
+  toggleLayer('ck-locdot',   'locationDot');
 }
 
 function setupObservers() {
@@ -464,15 +482,23 @@ function setStatus(msg, cls='') {
 const noResultsToast = $('no-results-toast');
 $('nt-close').addEventListener('click', () => { noResultsToast.style.display = 'none'; });
 
-function showNoResults(radius, label) {
-  const msg = `No NWR stations found within ${radius} miles of ${label}. Try increasing the radius.`;
+function showNoResults(radius, label, lat, lon) {
+  const msg = `No NWR stations found within ${radius} miles of "${label}". Try increasing the search radius.`;
 
   // In-app toast
   $('nt-title').textContent = `No stations within ${radius} mi`;
-  $('nt-body').textContent = `Nothing found near "${label}". Try increasing the radius slider.`;
+  $('nt-body').innerHTML = `Nothing found near <strong style="color:#e6edf3">${label}</strong>.<br>Try dragging the <strong style="color:#3fb950">RADIUS</strong> slider to a larger value and searching again.`;
   noResultsToast.style.display = 'flex';
-  // Auto-dismiss after 8s
-  setTimeout(() => { noResultsToast.style.display = 'none'; }, 8000);
+  // Auto-dismiss after 10s
+  clearTimeout(showNoResults._timer);
+  showNoResults._timer = setTimeout(() => { noResultsToast.style.display = 'none'; }, 10000);
+
+  // Place the location dot even when no stations found, then zoom there
+  if (lat != null && lon != null) {
+    clearMapLayers();
+    map.setView([lat, lon], 9);
+    placeLocationDot(lat, lon, label);
+  }
 
   // Browser notification (request permission if needed)
   if ('Notification' in window) {
@@ -637,13 +663,24 @@ function selectStation(item, el) {
   if (el) el.classList.add('active');
   selected = item.st;
 
-  // Detail bar
+  // Detail bar — clean structured layout
   const sc = STATUS_COLOR(selected.status);
   $('det-cs').textContent = selected.callsign;
   $('det-cs').style.color = sc;
-  $('det-sub').textContent =
-    `${selected.freq} MHz · ${selected.name}${selected.txLoc ? ' (broadcasts from ' + selected.txLoc + ')' : ''}, ${selected.state} · ${selected.pwr ? selected.pwr+' W' : ''} · WFO: ${selected.wfo.replace('|',' — ')}` +
-    (item.dist ? ` · ${item.dist.toFixed(1)} mi away` : '');
+
+  const statusLabel = selected.status || 'Unknown';
+  const distStr = item.dist ? `${item.dist.toFixed(1)} mi away` : '';
+  const wfoStr  = selected.wfo ? selected.wfo.split('|').join(', ') : '';
+
+  $('det-sub').innerHTML = [
+    selected.freq   ? `<span class="det-chip det-chip-freq">${selected.freq} MHz</span>` : '',
+    selected.name   ? `<span class="det-chip det-chip-name" title="Site name">${selected.name}</span>` : '',
+    selected.txLoc  ? `<span class="det-chip det-chip-loc" title="Transmitter location: ${selected.txLoc}"><span style="color:#484f58;font-size:10px;font-family:system-ui,sans-serif;margin-right:3px">LOCATION</span>${selected.txLoc}</span>` : '',
+    selected.pwr    ? `<span class="det-chip">${selected.pwr} W</span>` : '',
+    wfoStr          ? `<span class="det-chip det-chip-wfo">WFO: ${wfoStr}</span>` : '',
+    distStr         ? `<span class="det-chip det-chip-dist">${distStr}</span>` : '',
+    `<span class="det-badge" style="background:${sc}22;color:${sc};border:1px solid ${sc}55">${statusLabel}</span>`,
+  ].filter(Boolean).join('');
 
   $('det-btns').innerHTML = '';
 
@@ -689,7 +726,7 @@ function highlightSameRow(code) {
 
 // ── Map layer management ──────────────────────────────────────────────────────
 function clearMapLayers() {
-  ['prop','counties','alerting','sameLabels','stationMarker'].forEach(k => {
+  ['prop','counties','alerting','sameLabels','stationMarker','locationDot'].forEach(k => {
     if (mapLayers[k]) { map.removeLayer(mapLayers[k]); mapLayers[k] = null; }
   });
 }
@@ -768,6 +805,22 @@ function placeMarker(st, sc) {
                 ${st.freq} MHz · ${st.status}<br>
                 ${st.lat.toFixed(4)}, ${st.lon.toFixed(4)}`)
     .addTo(map);
+}
+
+// ── Location dot (blue pulsing dot for the searched location) ──────────────────
+function placeLocationDot(lat, lon, label) {
+  if (mapLayers.locationDot) { map.removeLayer(mapLayers.locationDot); mapLayers.locationDot = null; }
+  const icon = L.divIcon({
+    html: `<div style="position:relative;width:18px;height:18px">
+      <div style="position:absolute;inset:0;border-radius:50%;background:#4d9fff;opacity:.3;animation:locPulse 1.8s ease-out infinite"></div>
+      <div style="position:absolute;top:3px;left:3px;width:12px;height:12px;border-radius:50%;background:#4d9fff;border:2px solid #fff;box-shadow:0 0 6px #4d9fff99"></div>
+    </div>`,
+    iconSize:[18,18], iconAnchor:[9,9], className:''
+  });
+  mapLayers.locationDot = L.marker([lat, lon], {icon, zIndexOffset: 2000})
+    .bindPopup(`<b>📍 Location</b><br>${label}`)
+    .addTo(map);
+  mapLayers.locationDot.bringToFront();
 }
 
 // ── County layer ──────────────────────────────────────────────────────────────
@@ -1010,7 +1063,7 @@ function findNearbyCoords(lat, lon, label) {
     .filter(x => x.dist <= radius)
     .sort((a,b) => a.dist - b.dist);
   if (!nearby.length) {
-    setStatus(`No stations within ${radius} mi of ${label}`, 'err');
+    showNoResults(radius, label, lat, lon);
     return;
   }
   map.setView([lat, lon], 8);
@@ -1018,6 +1071,8 @@ function findNearbyCoords(lat, lon, label) {
   // Auto-select the nearest station
   const firstEl = resultsList.querySelector('.result-item');
   if (firstEl) selectStation(nearby[0], firstEl);
+  // Place blue location dot after station layers load (slight defer so station layers go first)
+  setTimeout(() => placeLocationDot(lat, lon, label), 600);
   setStatus(`✓ ${stationsList.length.toLocaleString()} stations · weather.gov`, 'ok');
 }
 
@@ -1034,7 +1089,7 @@ $('clear-btn').addEventListener('click', () => {
   currentResults = [];
   $('det-cs').textContent = '—';
   $('det-cs').style.color = '#484f58';
-  $('det-sub').textContent = 'Select a station to view details';
+  $('det-sub').innerHTML = '<span style="color:#484f58;font-family:system-ui,sans-serif">Select a station to view details</span>';
   $('det-btns').innerHTML = '';
   $('nws-btn').disabled = true;
   sameWrap.innerHTML = '<div id="same-empty">No station selected.</div>';

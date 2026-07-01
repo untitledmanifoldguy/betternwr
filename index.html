@@ -409,12 +409,16 @@ function buildCtrl() {
 // propagation, so the grid + hover/click targets stay usable) → labels →
 // markers → location dot (top).
 function reorderOverlays() {
-  if (mapLayers.prop)         mapLayers.prop.bringToFront();
-  if (mapLayers.alerting)     mapLayers.alerting.bringToFront();
-  if (mapLayers.counties)     mapLayers.counties.bringToFront();
-  if (mapLayers.sameLabels)   mapLayers.sameLabels.bringToFront();
-  if (mapLayers.stationMarker) mapLayers.stationMarker.bringToFront ? mapLayers.stationMarker.bringToFront() : null;
-  if (mapLayers.locationDot)  mapLayers.locationDot.bringToFront();
+  // Not every layer type implements bringToFront (e.g. L.layerGroup doesn't,
+  // only path/marker layers do) — guard so a missing method never throws
+  // and silently aborts whatever async flow called us.
+  const bring = layer => { if (layer && typeof layer.bringToFront === 'function') layer.bringToFront(); };
+  bring(mapLayers.prop);
+  bring(mapLayers.alerting);
+  bring(mapLayers.counties);
+  bring(mapLayers.sameLabels);
+  bring(mapLayers.stationMarker);
+  bring(mapLayers.locationDot);
 }
 
 function setupObservers() {
@@ -710,7 +714,8 @@ function selectStation(item, el) {
     `<span class="det-badge" style="background:${sc}22;color:${sc};border:1px solid ${sc}55">${statusLabel}</span>`,
   ].filter(Boolean).join('');
 
-  $('det-btns').innerHTML = '';
+  $('det-btns').innerHTML = `<button class="tb-btn btn-ghost" id="dist-me-btn" title="Find how far you are from this station">📍 DISTANCE TO ME</button>`;
+  $('dist-me-btn').addEventListener('click', findDistanceToSelected);
 
   $('nws-btn').disabled = false;
   $('nws-btn').onclick = () => window.open(`https://www.weather.gov/nwr/sites?site=${selected.callsign}`, '_blank');
@@ -1208,6 +1213,53 @@ function useMyLocation() {
   );
 }
 
+// ── Distance from me to the currently selected station ────────────────────────
+function findDistanceToSelected() {
+  if (!selected) return;
+  if (!('geolocation' in navigator)) {
+    setStatus('⚠ Geolocation not supported by this browser', 'err');
+    return;
+  }
+  const btn = $('dist-me-btn');
+  const origLabel = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '📍 LOCATING…'; }
+  setStatus('Requesting your location…', 'warn');
+
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      const lat = pos.coords.latitude, lon = pos.coords.longitude;
+      const dist = haversine(lat, lon, selected.lat, selected.lon);
+      const btnNow = $('dist-me-btn');
+      if (btnNow) { btnNow.disabled = false; btnNow.textContent = origLabel || '📍 DISTANCE TO ME'; }
+
+      // Refresh/insert a "from you" chip in the detail bar
+      const old = document.getElementById('det-chip-mydist');
+      if (old) old.remove();
+      $('det-sub').insertAdjacentHTML('beforeend',
+        `<span class="det-chip det-chip-dist" id="det-chip-mydist">📍 ${dist.toFixed(1)} mi from you</span>`);
+
+      // Drop the blue location dot at the user's position and frame both points
+      placeLocationDot(lat, lon, 'My Location');
+      try {
+        const bounds = L.latLngBounds([[lat, lon], [selected.lat, selected.lon]]);
+        map.fitBounds(bounds, {padding: [60, 60]});
+      } catch (_) {}
+
+      setStatus(`✓ ${dist.toFixed(1)} mi from you to ${selected.callsign}`, 'ok');
+    },
+    err => {
+      const btnNow = $('dist-me-btn');
+      if (btnNow) { btnNow.disabled = false; btnNow.textContent = origLabel || '📍 DISTANCE TO ME'; }
+      let msg = 'Unable to get your location';
+      if (err.code === err.PERMISSION_DENIED)      msg = 'Location permission denied';
+      else if (err.code === err.POSITION_UNAVAILABLE) msg = 'Location unavailable';
+      else if (err.code === err.TIMEOUT)            msg = 'Location request timed out';
+      setStatus(`⚠ ${msg}`, 'err');
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+  );
+}
+
 // ── Clear / reset ─────────────────────────────────────────────────────────────
 $('clear-btn').addEventListener('click', () => {
   csInput.value = '';
@@ -1224,6 +1276,7 @@ $('clear-btn').addEventListener('click', () => {
   $('det-sub').innerHTML = '<span style="color:#484f58;font-family:system-ui,sans-serif">Select a station to view details</span>';
   $('det-btns').innerHTML = '';
   $('nws-btn').disabled = true;
+  // (det-chip-mydist lives inside det-sub, which was just reset above)
   sameWrap.innerHTML = '<div id="same-empty">No station selected.</div>';
   $('same-hdr').textContent = 'Areas Receiving Alert Tones';
   setMapStatus('');

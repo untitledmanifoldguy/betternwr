@@ -705,7 +705,7 @@ function selectStation(item, el) {
 
   $('det-sub').innerHTML = [
     selected.txLoc  ? `<span class="det-chip det-chip-loc" title="Broadcast location"><span style="color:#484f58;font-size:10px;font-family:system-ui,sans-serif;margin-right:3px">Transmission location:</span>${selected.txLoc}</span>` : '',
-    selected.name   ? `<span class="det-chip det-chip-name" title="Site name">${selected.name}</span>` : '',
+    selected.name   ? `<span class="det-chip det-chip-name" title="Site name">Site name: ${selected.name}</span>` : '',
     selected.freq   ? `<span class="det-chip det-chip-freq">${selected.freq} MHz</span>` : '',
     selected.pwr    ? `<span class="det-chip">${selected.pwr} W</span>` : '',
     (selected.lat && selected.lon) ? `<span class="det-chip" title="GPS coordinates" style="color:#a371f7;border-color:#a371f744;background:#a371f711;font-family:monospace">📍 ${selected.lat.toFixed(4)}, ${selected.lon.toFixed(4)}</span>` : '',
@@ -865,10 +865,10 @@ function placeMarker(st, sc) {
 
   const rows = [
     ['Station ID',      `<span style="font-family:monospace;font-weight:700">${st.callsign}</span>`],
-    ['Station Name',    st.name || '—'],
+    ['Site Name',    st.name || '—'],
     ['Frequency',       st.freq ? `<span class="lp-freq">${st.freq} MHz</span>` : '—'],
     ['State',           st.state || '—'],
-    ['Station Location',st.txLoc || '—'],
+    ['Transmission location',st.txLoc || '—'],
     ['Power Output',    st.pwr  ? `${st.pwr} W` : '—'],
     ['Operating Status',`<span class="${statusClass}">${st.status || 'Unknown'}</span>`],
     ['GPS',             `<span class="lp-coords">${st.lat.toFixed(4)}, ${st.lon.toFixed(4)}</span>`],

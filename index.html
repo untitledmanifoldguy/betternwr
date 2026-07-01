@@ -471,7 +471,7 @@ function parseCCL(js) {
       state:    (r0.SITESTATE||r0.ST||'').trim(),
       status:   (r0.STATUS||'').trim(),
       name:     (r0.SITENAME||'').trim(),
-      txLoc: `${(r0.SITELOC || '').trim()}${r0.STEILOC ? `, ${r0.STEILOC.trim()}` : ''}`,
+      txLoc: `${(r0.SITELOC || '').trim()}${r0.SITESTATE ? `, ${r0.SITESTATE.trim()}` : ''}`,
       pwr:      (r0.PWR||'').trim(),
       wfo:      (r0.WFO||'').trim(),
       sameCodes, counties,
@@ -704,7 +704,7 @@ function selectStation(item, el) {
   const wfoStr  = selected.wfo ? selected.wfo.split('|').join(', ') : '';
 
   $('det-sub').innerHTML = [
-    selected.txLoc  ? `<span class="det-chip det-chip-loc" title="Broadcast location"><span style="color:#484f58;font-size:10px;font-family:system-ui,sans-serif;margin-right:3px">Transmission location</span>${selected.txLoc}</span>` : '',
+    selected.txLoc  ? `<span class="det-chip det-chip-loc" title="Broadcast location"><span style="color:#484f58;font-size:10px;font-family:system-ui,sans-serif;margin-right:3px">Transmission location:</span>${selected.txLoc}</span>` : '',
     selected.name   ? `<span class="det-chip det-chip-name" title="Site name">${selected.name}</span>` : '',
     selected.freq   ? `<span class="det-chip det-chip-freq">${selected.freq} MHz</span>` : '',
     selected.pwr    ? `<span class="det-chip">${selected.pwr} W</span>` : '',

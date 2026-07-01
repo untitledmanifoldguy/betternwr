@@ -76,7 +76,6 @@ html,body{height:100%;font-family:system-ui,sans-serif;background:#0d1117;color:
 .det-chip-loc{color:#8b949e;font-family:system-ui,sans-serif}
 .det-chip-wfo{color:#58a6ff;border-color:#58a6ff44;background:#58a6ff11}
 .det-chip-dist{color:#d29922;border-color:#d2992244;background:#d2992211}
-.det-chip-you{color:#a371f7;border-color:#a371f744;background:#a371f711}
 #det-sub{font-size:12px;color:#8b949e;flex:1;display:flex;align-items:center;flex-wrap:wrap;gap:2px;overflow:hidden}
 
 /* ── Detail / map area ── */
@@ -187,7 +186,7 @@ table.same-tbl tr.highlighted td{background:#58a6ff18}
       <span id="radius-lbl">40 mi</span>
     </div>
     <button class="tb-btn btn-green" id="loc-btn">FIND NEARBY →</button>
-    <button class="tb-btn btn-ghost" id="mylocation-btn" title="Use your current location">📍 MY LOCATION</button>
+    <button class="tb-btn btn-ghost" id="geo-btn" title="Use your current location">📍 MY LOCATION</button>
 
     <button class="tb-btn btn-ghost" id="clear-btn" title="Clear results and reset map">✕ CLEAR</button>
     <div class="tb-sep">|</div>
@@ -258,6 +257,7 @@ const CCL_URL_DIRECT = 'https://www.weather.gov/source/nwr/JS/CCL.js';
 const CCL_URL   = 'https://corsproxy.io/?' + encodeURIComponent('https://www.weather.gov/source/nwr/JS/CCL.js');
 const HIRES_URL = 'https://www.weather.gov/source/nwr/hires/{cs}.zip';
 const GEOCODE   = 'https://nominatim.openstreetmap.org/search';
+const REVERSE_GEOCODE = 'https://nominatim.openstreetmap.org/reverse';
 const TOPO_URL  = 'https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json';
 
 const STATUS_COLOR = s => {
@@ -297,7 +297,6 @@ let selected = null;        // currently selected station
 let currentResults = [];    // displayed result list
 let acItems = [];           // autocomplete items
 let acIdx = -1;
-let userLoc = null;         // {lat, lon, label} from browser geolocation
 
 // Map layers (togglable)
 let mapLayers = { prop: null, counties: null, alerting: null, sameLabels: null, stationMarker: null, locationDot: null };
@@ -395,7 +394,7 @@ function buildCtrl() {
     cb.addEventListener('change', () => {
       if (!mapLayers[key]) return;
       cb.checked ? mapLayers[key].addTo(map) : map.removeLayer(mapLayers[key]);
-      enforceLayerOrder();
+      reorderOverlays();
     });
   }
   toggleLayer('ck-prop',     'prop');
@@ -405,16 +404,17 @@ function buildCtrl() {
   toggleLayer('ck-locdot',   'locationDot');
 }
 
-// Keep a consistent stacking order regardless of which async layer
-// (propagation shapefile vs. county topojson) finishes loading first:
-// propagation (bottom) → alerting fill → counties → labels → markers/dot (top)
-function enforceLayerOrder() {
-  if (mapLayers.prop)          mapLayers.prop.bringToBack();
-  if (mapLayers.alerting)      mapLayers.alerting.bringToFront();
-  if (mapLayers.counties)      mapLayers.counties.bringToFront();
-  if (mapLayers.sameLabels)    mapLayers.sameLabels.bringToFront();
-  if (mapLayers.stationMarker) mapLayers.stationMarker.bringToFront();
-  if (mapLayers.locationDot)   mapLayers.locationDot.bringToFront();
+// Enforce a consistent stacking order regardless of the order layers were
+// added/toggled in: propagation (bottom) → alerting → counties (on top of
+// propagation, so the grid + hover/click targets stay usable) → labels →
+// markers → location dot (top).
+function reorderOverlays() {
+  if (mapLayers.prop)         mapLayers.prop.bringToFront();
+  if (mapLayers.alerting)     mapLayers.alerting.bringToFront();
+  if (mapLayers.counties)     mapLayers.counties.bringToFront();
+  if (mapLayers.sameLabels)   mapLayers.sameLabels.bringToFront();
+  if (mapLayers.stationMarker) mapLayers.stationMarker.bringToFront ? mapLayers.stationMarker.bringToFront() : null;
+  if (mapLayers.locationDot)  mapLayers.locationDot.bringToFront();
 }
 
 function setupObservers() {
@@ -699,13 +699,6 @@ function selectStation(item, el) {
   const distStr = item.dist ? `${item.dist.toFixed(1)} mi away` : '';
   const wfoStr  = selected.wfo ? selected.wfo.split('|').join(', ') : '';
 
-  // Distance from the user's browser-reported location (if granted)
-  let youDistStr = '';
-  if (userLoc && selected.lat && selected.lon) {
-    const d = haversine(userLoc.lat, userLoc.lon, selected.lat, selected.lon);
-    youDistStr = `${d.toFixed(1)} mi from you`;
-  }
-
   $('det-sub').innerHTML = [
     selected.txLoc  ? `<span class="det-chip det-chip-loc" title="Broadcast location"><span style="color:#484f58;font-size:10px;font-family:system-ui,sans-serif;margin-right:3px">LOCATION</span>${selected.txLoc}</span>` : '',
     selected.name   ? `<span class="det-chip det-chip-name" title="Site name">${selected.name}</span>` : '',
@@ -714,7 +707,6 @@ function selectStation(item, el) {
     (selected.lat && selected.lon) ? `<span class="det-chip" title="GPS coordinates" style="color:#a371f7;border-color:#a371f744;background:#a371f711;font-family:monospace">📍 ${selected.lat.toFixed(4)}, ${selected.lon.toFixed(4)}</span>` : '',
     wfoStr          ? `<span class="det-chip det-chip-wfo">WFO: ${wfoStr}</span>` : '',
     distStr         ? `<span class="det-chip det-chip-dist">${distStr}</span>` : '',
-    youDistStr      ? `<span class="det-chip det-chip-you" title="Distance from your current location">🧭 ${youDistStr}</span>` : '',
     `<span class="det-badge" style="background:${sc}22;color:${sc};border:1px solid ${sc}55">${statusLabel}</span>`,
   ].filter(Boolean).join('');
 
@@ -840,8 +832,9 @@ function loadPropagation(st) {
       });
 
       if (getCbChecked('ck-prop')) mapLayers.prop.addTo(map);
-      // Propagation must always render underneath the county grid/alerting fill
-      enforceLayerOrder();
+      // Propagation just loaded (possibly after counties) — re-assert
+      // the stacking order so counties/alerting stay visually on top.
+      reorderOverlays();
       forceMapResize();
     })
     .catch(err => {
@@ -885,7 +878,7 @@ function placeMarker(st, sc) {
   mapLayers.stationMarker = L.marker([st.lat, st.lon], {icon})
     .bindPopup(popup, {maxWidth: 280})
     .addTo(map);
-  enforceLayerOrder();
+  reorderOverlays();
 }
 
 // ── Location dot (blue pulsing dot for the searched location) ──────────────────
@@ -965,9 +958,6 @@ function loadCounties(st, sc, token) {
     });
     if (getCbChecked('ck-alert')) mapLayers.alerting.addTo(map);
 
-    // Counties (and the alerting fill) must sit above the propagation layer
-    enforceLayerOrder();
-
     // Zoom to alerting area (or county layer if no alerting counties)
     try {
       const alertBounds = mapLayers.alerting.getBounds();
@@ -1005,6 +995,11 @@ function loadCounties(st, sc, token) {
     });
     mapLayers.sameLabels = L.layerGroup(labelMarkers);
     // Off by default — checkbox starts unchecked
+
+    // Counties should sit above the propagation coverage overlay so the
+    // grid, borders, and click/hover targets stay usable on top of the
+    // (often loaded-later) propagation shading.
+    reorderOverlays();
 
     map.on('popupclose', () => {
       sameWrap.querySelectorAll('tr.highlighted').forEach(tr => tr.classList.remove('highlighted'));
@@ -1164,47 +1159,54 @@ function findNearbyCoords(lat, lon, label) {
   setStatus(`✓ ${stationsList.length.toLocaleString()} stations · weather.gov`, 'ok');
 }
 
-// ── "Use my location" (browser geolocation) ───────────────────────────────────
-const mylocBtn = $('mylocation-btn');
+// ── Use my location (browser geolocation) ─────────────────────────────────────
+$('geo-btn').addEventListener('click', useMyLocation);
 
-mylocBtn.addEventListener('click', () => {
+function useMyLocation() {
   if (!('geolocation' in navigator)) {
     setStatus('⚠ Geolocation not supported by this browser', 'err');
     return;
   }
   if (!stationsList.length) { setStatus('⚠ Stations not loaded yet', 'warn'); return; }
 
-  mylocBtn.disabled = true;
-  mylocBtn.textContent = '📍 LOCATING…';
+  hideLacDrop();
+  $('geo-btn').disabled = true;
+  const origLabel = $('geo-btn').textContent;
+  $('geo-btn').textContent = '📍 LOCATING…';
   setStatus('Requesting your location…', 'warn');
 
   navigator.geolocation.getCurrentPosition(
     pos => {
-      const { latitude: lat, longitude: lon } = pos.coords;
-      userLoc = { lat, lon, label: 'My Location' };
-      mylocBtn.disabled = false;
-      mylocBtn.textContent = '📍 MY LOCATION';
-      locInput.value = 'My Location';
-      findNearbyCoords(lat, lon, 'My Location');
-      // Refresh the "distance from you" chip if a station is already selected
-      if (selected) {
-        const activeEl = resultsList.querySelector('.result-item.active');
-        selectStation({st: selected, dist: activeEl ? null : null}, activeEl);
-      }
+      const lat = pos.coords.latitude, lon = pos.coords.longitude;
+      $('geo-btn').disabled = false;
+      $('geo-btn').textContent = origLabel;
+
+      // Reverse-geocode for a friendly label; fall back to "My Location"
+      const url = `${REVERSE_GEOCODE}?lat=${lat}&lon=${lon}&format=json&addressdetails=1`;
+      fetch(url, {headers:{'Accept-Language':'en'}})
+        .then(r => r.json())
+        .then(data => {
+          const label = (data && (data.address || data.display_name)) ? shortLabel(data) : 'My Location';
+          locInput.value = label;
+          findNearbyCoords(lat, lon, label);
+        })
+        .catch(() => {
+          locInput.value = 'My Location';
+          findNearbyCoords(lat, lon, 'My Location');
+        });
     },
     err => {
-      mylocBtn.disabled = false;
-      mylocBtn.textContent = '📍 MY LOCATION';
-      const msgs = {
-        1: 'Location permission denied',
-        2: 'Location unavailable',
-        3: 'Location request timed out',
-      };
-      setStatus(`⚠ ${msgs[err.code] || 'Could not get your location'}`, 'err');
+      $('geo-btn').disabled = false;
+      $('geo-btn').textContent = origLabel;
+      let msg = 'Unable to get your location';
+      if (err.code === err.PERMISSION_DENIED)      msg = 'Location permission denied';
+      else if (err.code === err.POSITION_UNAVAILABLE) msg = 'Location unavailable';
+      else if (err.code === err.TIMEOUT)            msg = 'Location request timed out';
+      setStatus(`⚠ ${msg}`, 'err');
     },
     { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
   );
-});
+}
 
 // ── Clear / reset ─────────────────────────────────────────────────────────────
 $('clear-btn').addEventListener('click', () => {
